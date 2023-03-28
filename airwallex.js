@@ -1,101 +1,91 @@
-// Import the Airwallex Node.js SDK
 const airwallex = require('airwallex');
+const Medusa = require('medusa-ecommerce');
 
-// Initialize the Airwallex SDK with your API key
-const airwallexClient = new airwallex.Client({
-  apiKey: 'YOUR_API_KEY_HERE',
-  apiBase: 'https://api.airwallex.com'
-});
-
-async function processPayment(payment) {
-  const { amount, currency, paymentMethod, card } = payment;
-
-  if (paymentMethod === 'card') {
-    const paymentIntent = await createCreditCardPaymentIntent(amount, currency, card);
-    return handlePaymentIntent(paymentIntent, paymentMethod);
-  } else {
-    const paymentIntent = await createAlternativePaymentIntent(amount, currency, paymentMethod);
-    return handlePaymentIntent(paymentIntent, paymentMethod);
+class AirwallexPaymentProcessor {
+  constructor(options) {
+    this.options = options;
+    this.client = new airwallex({
+      api_key: options.api_key,
+      env: options.env || 'test'
+    });
   }
-}
 
-async function createCreditCardPaymentIntent(amount, currency, card) {
-  return airwallexClient.paymentIntents.create({
-    amount,
-    currency,
-    payment_method: {
-      card
+  async processPayment(payment) {
+    const { amount, currency, paymentMethod, card } = payment;
+
+    try {
+      const paymentIntent = await this.createPaymentIntent(amount, currency, paymentMethod, card);
+      const result = await this.handlePaymentIntent(paymentIntent, paymentMethod);
+      return result;
+    } catch (error) {
+      throw new Error(`Payment failed: ${error.message}`);
     }
-  });
-}
+  }
 
-async function createAlternativePaymentIntent(amount, currency, paymentMethod) {
-  return airwallexClient.paymentIntents.create({
-    amount,
-    currency,
-    payment_method: {
-      type: paymentMethod
+  async createPaymentIntent(amount, currency, paymentMethod, card) {
+    const paymentMethodOptions = card ? { card } : { type: paymentMethod };
+
+    const paymentIntent = await this.client.paymentIntents.create({
+      amount,
+      currency,
+      payment_method: paymentMethodOptions
+    });
+
+    return paymentIntent;
+  }
+
+  async handlePaymentIntent(paymentIntent, paymentMethod) {
+    const { status, failure_message, next_action } = paymentIntent;
+
+    switch (status) {
+      case 'REQUIRES_ACTION':
+        return this.handleRequiresAction(paymentIntent);
+      case 'SUCCEEDED':
+        return this.handleSuccess(paymentIntent, paymentMethod);
+      default:
+        throw new Error(`Payment failed: ${failure_message}`);
     }
-  });
-}
-
-function handlePaymentIntent(paymentIntent, paymentMethod) {
-  if (paymentIntent.status === 'REQUIRES_ACTION') {
-    return handleRequiresAction(paymentIntent);
   }
 
-  if (paymentIntent.status === 'SUCCEEDED') {
-    return handleSuccess(paymentIntent, paymentMethod);
+  handleRequiresAction(paymentIntent) {
+    const { next_action } = paymentIntent;
+
+    switch (next_action.type) {
+      case 'card_verification':
+        return {
+          status: 'requires_action',
+          action: {
+            type: 'card_verification',
+            payment_intent_id: paymentIntent.id
+          }
+        };
+      case 'redirect':
+        return {
+          status: 'requires_action',
+          action: {
+            type: 'redirect',
+            url: next_action.redirect_url
+          }
+        };
+      default:
+        throw new Error(`Unknown action type: ${next_action.type}`);
+    }
   }
 
-  throw new Error(`Payment failed: ${paymentIntent.failure_message}`);
-}
+  async handleSuccess(paymentIntent, paymentMethod) {
+    const transaction = await Medusa.Transaction.create({
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      status: 'captured',
+      payment_id: paymentMethod,
+      provider_id: paymentIntent.id
+    });
 
-function handleRequiresAction(paymentIntent) {
-  if (paymentIntent.next_action.type === 'card_verification') {
     return {
-      status: 'requires_action',
-      action: {
-        type: 'card_verification',
-        payment_intent_id: paymentIntent.id
-      }
+      status: 'captured',
+      transaction
     };
   }
-
-  if (paymentIntent.next_action.type === 'redirect') {
-    return {
-      status: 'requires_action',
-      action: {
-        type: 'redirect',
-        url: paymentIntent.next_action.redirect_url
-      }
-    };
-  }
-
-  throw new Error(`Unknown action type: ${paymentIntent.next_action.type}`);
 }
 
-async function handleSuccess(paymentIntent, paymentMethod) {
-  const transaction = await Medusa.Transaction.create({
-    amount: paymentIntent.amount,
-    currency: paymentIntent.currency,
-    status: 'captured',
-    payment_id: paymentMethod,
-    provider_id: paymentIntent.id
-  });
-
-  return {
-    status: 'captured',
-    transaction
-  };
-}
-
-// Export the processPayment and refundPayment functions as a MedusaJS plugin
-module.exports = {
-  name: 'airwallex',
-  version: '1.0.0',
-  config: {},
-  async initialize() {},
-  async processPayment,
-  async refundPayment
-};
+module.exports = AirwallexPaymentProcessor;
