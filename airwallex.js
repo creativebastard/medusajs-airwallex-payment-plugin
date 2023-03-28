@@ -8,77 +8,97 @@ const airwallexClient = new airwallex.Client({
 });
 
 async function processPayment(payment) {
-  const { amount, currency, paymentMethod } = payment;
+  const { amount, currency, paymentMethod, card } = payment;
 
-  // Create a new Airwallex payment intent
-  const paymentIntent = await airwallexClient.paymentIntents.create({
-    amount,
-    currency,
-    payment_method: paymentMethod
-  });
-
-  // If the payment intent requires authentication, redirect the customer to the authentication URL
-  if (paymentIntent.next_action.type === 'redirect') {
-    return {
-      status: 'requires_action',
-      action: {
-        type: 'redirect',
-        url: paymentIntent.next_action.redirect_url
+  if (paymentMethod === 'card') {
+    // Create a new Airwallex credit card payment intent
+    const paymentIntent = await airwallexClient.paymentIntents.create({
+      amount,
+      currency,
+      payment_method: {
+        card
       }
-    };
-  }
-
-  // If the payment intent is successful, create a new transaction object in MedusaJS
-  if (paymentIntent.status === 'succeeded') {
-    const transaction = await Medusa.Transaction.create({
-      amount: paymentIntent.amount,
-      currency: paymentIntent.currency,
-      status: 'captured',
-      payment_id: paymentMethod,
-      provider_id: paymentIntent.id
     });
 
-    return {
-      status: 'captured',
-      transaction
-    };
-  }
+    // If the payment intent requires authentication, return a requires_action status with the next action
+    if (paymentIntent.status === 'REQUIRES_ACTION') {
+      return {
+        status: 'requires_action',
+        action: {
+          type: 'card_verification',
+          payment_intent_id: paymentIntent.id
+        }
+      };
+    }
 
-  // If the payment intent is still in progress, return a requires_action status with the next action
-  if (paymentIntent.status === 'requires_action') {
-    return {
-      status: 'requires_action',
-      action: {
-        type: 'redirect',
-        url: paymentIntent.next_action.redirect_url
+    // If the payment intent is successful, create a new transaction object in MedusaJS
+    if (paymentIntent.status === 'SUCCEEDED') {
+      const transaction = await Medusa.Transaction.create({
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency,
+        status: 'captured',
+        payment_id: paymentMethod,
+        provider_id: paymentIntent.id
+      });
+
+      return {
+        status: 'captured',
+        transaction
+      };
+    }
+
+    // If the payment intent has failed, reject the Promise with an error
+    if (paymentIntent.status === 'FAILED') {
+      throw new Error(`Payment failed: ${paymentIntent.failure_message}`);
+    }
+
+    // If the payment intent is in an unknown state, reject the Promise with an error
+    throw new Error(`Unknown payment status: ${paymentIntent.status}`);
+  } else {
+    // Create a new Airwallex alternative payment intent
+    const paymentIntent = await airwallexClient.paymentIntents.create({
+      amount,
+      currency,
+      payment_method: {
+        type: paymentMethod
       }
-    };
+    });
+
+    // If the payment intent requires authentication, return a requires_action status with the next action
+    if (paymentIntent.status === 'REQUIRES_ACTION') {
+      return {
+        status: 'requires_action',
+        action: {
+          type: 'redirect',
+          url: paymentIntent.next_action.redirect_url
+        }
+      };
+    }
+
+    // If the payment intent is successful, create a new transaction object in MedusaJS
+    if (paymentIntent.status === 'SUCCEEDED') {
+      const transaction = await Medusa.Transaction.create({
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency,
+        status: 'captured',
+        payment_id: paymentMethod,
+        provider_id: paymentIntent.id
+      });
+
+      return {
+        status: 'captured',
+        transaction
+      };
+    }
+
+    // If the payment intent has failed, reject the Promise with an error
+    if (paymentIntent.status === 'FAILED') {
+      throw new Error(`Payment failed: ${paymentIntent.failure_message}`);
+    }
+
+    // If the payment intent is in an unknown state, reject the Promise with an error
+    throw new Error(`Unknown payment status: ${paymentIntent.status}`);
   }
-
-  // If the payment intent has failed, reject the Promise with an error
-  if (paymentIntent.status === 'failed') {
-    throw new Error(`Payment failed: ${paymentIntent.last_payment_error.message}`);
-  }
-
-  // If the payment intent is in an unknown state, reject the Promise with an error
-  throw new Error(`Unknown payment status: ${paymentIntent.status}`);
-}
-
-async function refundPayment(transaction, amount) {
-  // Use the Airwallex API to refund the payment
-  const refund = await airwallexClient.refunds.create(transaction.provider_id, {
-    amount: amount,
-    currency: transaction.currency
-  });
-
-  // Update the transaction status in MedusaJS to refunded
-  transaction.status = 'refunded';
-  await transaction.save();
-
-  return {
-    status: 'refunded',
-    refund
-  };
 }
 
 // Export the processPayment and refundPayment functions as a MedusaJS plugin
