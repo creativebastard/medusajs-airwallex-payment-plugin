@@ -1,91 +1,74 @@
-const airwallex = require('airwallex');
-const Medusa = require('medusa-ecommerce');
+import logging
+import requests
+from medusajs import PaymentProcessor
 
-class AirwallexPaymentProcessor {
-  constructor(options) {
-    this.options = options;
-    this.client = new airwallex({
-      api_key: options.api_key,
-      env: options.env || 'test'
-    });
-  }
+class AirwallexPaymentProcessor(PaymentProcessor):
 
-  async processPayment(payment) {
-    const { amount, currency, paymentMethod, card } = payment;
+    def __init__(self, client_id, api_key):
+        super().__init__()
+        self.client_id = client_id
+        self.api_key = api_key
 
-    try {
-      const paymentIntent = await this.createPaymentIntent(amount, currency, paymentMethod, card);
-      const result = await this.handlePaymentIntent(paymentIntent, paymentMethod);
-      return result;
-    } catch (error) {
-      throw new Error(`Payment failed: ${error.message}`);
-    }
-  }
+        # Set up logging
+        logging.basicConfig(level=logging.INFO)
 
-  async createPaymentIntent(amount, currency, paymentMethod, card) {
-    const paymentMethodOptions = card ? { card } : { type: paymentMethod };
+    def create_payment(self, amount, currency, recipient_details):
+        url = "https://api.airwallex.com/v1/payments"
+        data = {
+            "amount": amount,
+            "currency": currency,
+            "recipient_details": recipient_details,
+        }
+        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"}, json=data)
 
-    const paymentIntent = await this.client.paymentIntents.create({
-      amount,
-      currency,
-      payment_method: paymentMethodOptions
-    });
+        # Check the status code of the response
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            logging.error(f"Invalid request: {response.json()}")
+            raise ValueError(f"Invalid request: {response.json()}")
+        elif response.status_code == 401:
+            logging.error(f"Unauthorized: {response.json()}")
+            raise Exception(f"Unauthorized: {response.json()}")
+        else:
+            logging.error(f"Unknown error: {response.status_code}")
+            raise Exception(f"Unknown error: {response.status_code}")
 
-    return paymentIntent;
-  }
+    def capture_payment(self, payment_id):
+        url = f"https://api.airwallex.com/v1/payments/{payment_id}/capture"
+        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"})
 
-  async handlePaymentIntent(paymentIntent, paymentMethod) {
-    const { status, failure_message, next_action } = paymentIntent;
+        # Check the status code of the response
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            logging.error(f"Invalid request: {response.json()}")
+            raise ValueError(f"Invalid request: {response.json()}")
+        elif response.status_code == 401:
+            logging.error(f"Unauthorized: {response.json()}")
+            raise Exception(f"Unauthorized: {response.json()}")
+        else:
+            logging.error(f"Unknown error: {response.status_code}")
+            raise Exception(f"Unknown error: {response.status_code}")
 
-    switch (status) {
-      case 'REQUIRES_ACTION':
-        return this.handleRequiresAction(paymentIntent);
-      case 'SUCCEEDED':
-        return this.handleSuccess(paymentIntent, paymentMethod);
-      default:
-        throw new Error(`Payment failed: ${failure_message}`);
-    }
-  }
+    def refund_payment(self, payment_id):
+        url = f"https://api.airwallex.com/v1/payments/{payment_id}/refund"
+        data = {
+            "amount": amount,
+            "currency": currency,
+        }
+        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"}, json=data)
 
-  handleRequiresAction(paymentIntent) {
-    const { next_action } = paymentIntent;
+        # Check the status code of the response
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            logging.error(f"Invalid request: {response.json()}")
+            raise ValueError(f"Invalid request: {response.json()}")
+        elif response.status_code == 401:
+            logging.error(f"Unauthorized: {response.json()}")
+            raise Exception(f"Unauthorized: {response.json()}")
+        else:
+            logging.error(f"Unknown error: {response.status_code}")
+            raise Exception(f"Unknown error: {response.status_code}")
 
-    switch (next_action.type) {
-      case 'card_verification':
-        return {
-          status: 'requires_action',
-          action: {
-            type: 'card_verification',
-            payment_intent_id: paymentIntent.id
-          }
-        };
-      case 'redirect':
-        return {
-          status: 'requires_action',
-          action: {
-            type: 'redirect',
-            url: next_action.redirect_url
-          }
-        };
-      default:
-        throw new Error(`Unknown action type: ${next_action.type}`);
-    }
-  }
-
-  async handleSuccess(paymentIntent, paymentMethod) {
-    const transaction = await Medusa.Transaction.create({
-      amount: paymentIntent.amount,
-      currency: paymentIntent.currency,
-      status: 'captured',
-      payment_id: paymentMethod,
-      provider_id: paymentIntent.id
-    });
-
-    return {
-      status: 'captured',
-      transaction
-    };
-  }
-}
-
-module.exports = AirwallexPaymentProcessor;
