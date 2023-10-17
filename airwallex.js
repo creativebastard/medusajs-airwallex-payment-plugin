@@ -1,74 +1,89 @@
-import logging
-import requests
-from medusajs import PaymentProcessor
+// Import the necessary libraries
+import { MedusaPlugin } from '@medusajs/medusa/plugins';
+import Airwallex from 'airwallex';
 
-class AirwallexPaymentProcessor(PaymentProcessor):
+// Create a new MedusaPlugin class
+class AirwallexPlugin extends MedusaPlugin {
+  constructor(config) {
+    super(config);
 
-    def __init__(self, client_id, api_key):
-        super().__init__()
-        self.client_id = client_id
-        self.api_key = api_key
+    // Create a new Airwallex client
+    this.airwallex = new Airwallex({
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+    });
+  }
 
-        # Set up logging
-        logging.basicConfig(level=logging.INFO)
+  // This method will be called when a payment is processed
+  async processPayment(payment) {
+    try {
+      // Create a new Airwallex charge
+      const charge = await this.airwallex.charges.create({
+        amount: payment.amount,
+        currency: payment.currency,
+        description: payment.description,
+        source: payment.source,
+      });
 
-    def create_payment(self, amount, currency, recipient_details):
-        url = "https://api.airwallex.com/v1/payments"
-        data = {
-            "amount": amount,
-            "currency": currency,
-            "recipient_details": recipient_details,
-        }
-        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"}, json=data)
+      // If the charge is successful, return the charge ID
+      if (charge.status === 'successful') {
+        return charge.id;
+      }
 
-        # Check the status code of the response
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 400:
-            logging.error(f"Invalid request: {response.json()}")
-            raise ValueError(f"Invalid request: {response.json()}")
-        elif response.status_code == 401:
-            logging.error(f"Unauthorized: {response.json()}")
-            raise Exception(f"Unauthorized: {response.json()}")
-        else:
-            logging.error(f"Unknown error: {response.status_code}")
-            raise Exception(f"Unknown error: {response.status_code}")
+      // If the charge is not successful, throw an error
+      throw new Error(`Airwallex charge failed: ${charge.message}`);
+    } catch (error) {
+      // Handle the error
+      console.error(error);
+    }
+  }
 
-    def capture_payment(self, payment_id):
-        url = f"https://api.airwallex.com/v1/payments/{payment_id}/capture"
-        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"})
+  // This method will be called when a partial refund is processed
+  async partialRefundPayment(refund) {
+    try {
+      // Create a new Airwallex refund
+      const refund = await this.airwallex.refunds.create({
+        chargeId: refund.chargeId,
+        amount: refund.amount,
+        currency: refund.currency,
+        description: refund.description,
+      });
 
-        # Check the status code of the response
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 400:
-            logging.error(f"Invalid request: {response.json()}")
-            raise ValueError(f"Invalid request: {response.json()}")
-        elif response.status_code == 401:
-            logging.error(f"Unauthorized: {response.json()}")
-            raise Exception(f"Unauthorized: {response.json()}")
-        else:
-            logging.error(f"Unknown error: {response.status_code}")
-            raise Exception(f"Unknown error: {response.status_code}")
+      // If the refund is successful, return the refund ID
+      if (refund.status === 'successful') {
+        return refund.id;
+      }
 
-    def refund_payment(self, payment_id):
-        url = f"https://api.airwallex.com/v1/payments/{payment_id}/refund"
-        data = {
-            "amount": amount,
-            "currency": currency,
-        }
-        response = requests.post(url, headers={"Authorization": f"Bearer {self.api_key}"}, json=data)
+      // If the refund is not successful, throw an error
+      throw new Error(`Airwallex refund failed: ${refund.message}`);
+    } catch (error) {
+      // Handle the error
+      console.error(error);
+    }
+  }
 
-        # Check the status code of the response
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 400:
-            logging.error(f"Invalid request: {response.json()}")
-            raise ValueError(f"Invalid request: {response.json()}")
-        elif response.status_code == 401:
-            logging.error(f"Unauthorized: {response.json()}")
-            raise Exception(f"Unauthorized: {response.json()}")
-        else:
-            logging.error(f"Unknown error: {response.status_code}")
-            raise Exception(f"Unknown error: {response.status_code}")
+  // This method will be called when a recurring payment is processed
+  async createRecurringPayment(subscription) {
+    try {
+      // Create a new Airwallex subscription
+      const subscription = await this.airwallex.subscriptions.create({
+        planId: subscription.planId,
+        customerId: subscription.customerId,
+      });
 
+      // If the subscription is successful, return the subscription ID
+      if (subscription.status === 'active') {
+        return subscription.id;
+      }
+
+      // If the subscription is not successful, throw an error
+      throw new Error(`Airwallex subscription failed: ${subscription.message}`);
+    } catch (error) {
+      // Handle the error
+      console.error(error);
+    }
+  }
+}
+
+// Export the AirwallexPlugin class
+export default AirwallexPlugin;
