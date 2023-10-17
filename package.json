@@ -1,11 +1,17 @@
 {
-  "name": "medusajs-airwallex-payment-plugin",
+  "name": "medusa-airwallex-plugin",
   "version": "1.0.0",
-  "description": "Payment processing plugin for MedusaJS with Airwallex",
-  "author": "Jeremy Bogan",
-  "license": "MIT",
+  "description": "A MedusaJS plugin for processing payments through Airwallex",
+  "main": "./airwallex.plugin.js",
+  "scripts": {
+    "start": "node airwallex.plugin.js",
+    "test": "mocha"
+  },
   "dependencies": {
-    "airwallex": "^2.0.0",
-    "medusa-ecommerce": "^1.7.0"
+    "@medusajs/medusa/plugins": "^1.0.0",
+    "airwallex": "^3.0.0"
+  },
+  "devDependencies": {
+    "mocha": "^9.0.0"
   }
 }
